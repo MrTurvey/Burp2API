@@ -4,159 +4,148 @@ import json
 import base64
 import re
 import os
+import json
 
-#set output directory
+# set output directory
 directory = "output"
 
 def process_tree(tree):
-    """ Process the XML tree to reorder items, remove unwanted items, deduplicate, and clean entities. """
-
+    # Extract root from XML, define the HTTP method order and use a set to track unique URL, method and paths.
     root = tree.getroot()
+    methods_order = ["GET", "POST", "DELETE", "PUT", "PATCH", "OPTIONS"]
+    seen_methods = set()
+    new_items = []
 
-    # Reordering items based on method
-    methods_order = ["GET", "POST", "DELETE", "PUT", "PATCH"]
-    items = list(root.findall("item"))
-    # Sort items by method, considering the order in methods_order
-    sorted_items = sorted(items, key=lambda x: methods_order.index(x.findtext("method")))
-    
-    # Remove all items from root and re-add them in sorted order
-    root.clear()
-    for item in sorted_items:
-        root.append(item)
-    
-    # Further processing (deduplication, removal of OPTIONS, etc.)
-    seen_methods = set()  
-    for item in root.findall("item")[:]:
-        url, method, uPath = item.findtext("url"), item.findtext("method"), item.findtext("path") 
+    # Interate over the XML items, sorted by the defined HTTP method order.
+    for item in sorted(root.findall("item"), key=lambda x: methods_order.index(x.findtext("method"))):
+        # Extracts URL, method, and path text from the current item.
+        url, method, uPath = item.findtext("url"), item.findtext("method"), item.findtext("path")
+        # Creates a unique key based on URL, method, and path.
+        item_key = (url, method, uPath)
         
-        # Remove items with 'OPTIONS' method
-        if method == "OPTIONS":
-            root.remove(item)
+        # Skips processing for OPTIONS methods, root path, or already seen item keys.
+        if method == "OPTIONS" or uPath == "/" or item_key in seen_methods:
             continue
         
-        # Remove any roots to leave only API endpoints
-        if uPath == "/":
-            root.remove(item)
-            continue
-
-        # Deduplicate items based on method
-        item_key = (url, method)
-        if item_key in seen_methods:
-            root.remove(item)
-            continue
+        # Marks the current item's key as seen.
         seen_methods.add(item_key)
-
-        # Remove unnecessary entities
+        
+        # Removes unrequired sub-elements from the XML to clean it up.
         for entity in ["host", "port", "protocol", "extension", "responselength", "response", "comment", "time"]:
             element = item.find(entity)
             if element is not None:
                 item.remove(element)
 
-        # Base64 decode request
+        # Processes and cleans the "request" element's text, if present.
         request_element = item.find("request")
         if request_element is not None and request_element.text:
             decoded_request = base64.b64decode(request_element.text).decode("utf-8", errors="ignore")
             decoded_request = re.sub(r"Connection: close.*?\n\s*", "", decoded_request, flags=re.DOTALL)
             request_element.text = decoded_request
-    
-       # Take the GET params and put it into a new XML field 
-        if method == "GET":
-            gpath_element = item.find("path")
-            if gpath_element is not None:
-                path = gpath_element.text
-                if '?' in path:
-                   # Split the path at the question mark and update the path element
-                   path, Gparam = path.split('?', 1)
-                   gpath_element.text = path
-                   # Create a new <param> element and add it to the <item>
-                   getparam_element = ET.SubElement(item, "param")
-                   getparam_element.text = Gparam
 
-        # Take the other params (POST/PUT/ETC) and put it into a new XML field
-        if method != "GET":
-            # and while we're at it, remove any GET params for when devs are YOLOing because it breaks the OpenAPI format
-           ppath_element = item.find("path")
-           if ppath_element is not None:
-                path = ppath_element.text
-                if '?' in path:
-                     path, Gparam = path.split('?', 1)
-                     ppath_element.text = path
-            # now sort the new XML params entity out
-           req_element = item.find("request")
-           if req_element is not None:
-                req = req_element.text
-                Pparam = req.split('\n')[-1]
-                req_element.text = req
-                # Create a new <param> element and add it to the <item>
-                postparam_element = ET.SubElement(item, "param")
-                postparam_element.text = Pparam
-    
+        # Splits the path from it's parameters and adds a new "param" element with the parameters, if they exist.
+        path_element = item.find("path")
+        if path_element is not None and '?' in path_element.text:
+            path, params = path_element.text.split('?', 1)
+            path_element.text = path
+            params_element = ET.SubElement(item, "param")
+            params_element.text = params
+        elif method != "GET" and request_element is not None:
+            params = request_element.text.split('\n')[-1]
+            params_element = ET.SubElement(item, "param")
+            params_element.text = params
+
+        # Adds the cleaned and possibly modified item to the new items list.
+        new_items.append(item)
+
+    # Clears the root element
+    root.clear()
+    # Re-populates the root element with the cleaned and processed items.
+    for item in new_items:
+        root.append(item)
+
+    # Returns the modified XML.
     return root
 
+# For checking if the input is a valid JSON string
+def is_json_param(param):
+    try:
+        json.loads(param)  # Try to parse the parameter as JSON
+        return True
+    except ValueError:
+        return False
+
+
 def convert_to_openapi(cleanedTree):
-	
-    """ Initalise the XML Tree """
-    treeRoot = cleanedTree.findall("item")
-	
-    """ Convert the XML tree to OpenAPI format, with responses based on <status>. """
+    # Find all elements in the XML created in the process_tree function
+    items = cleanedTree.findall("item")
+
+    # If there are no "item" elements, return an empty dictionary.
+    if not items:
+        return {}  # Return an empty dict or a base structure if no items found
+
+    # Extract the "url" text from the first XML "item" and split it to get the domain part.
+    first_url = items[0].findtext("url")
+    splitURL = first_url.split('/')[2]
+    
+     # Determine the API name. If "www." or "api." is in the URL, use the next string for the name.
+    api_name = splitURL.split('.')[1] if any(prefix in first_url for prefix in ["www.", "api."]) else splitURL.split('.')[0]
+    # Construct the base URL using the domain.
+    base_url = f"https://{splitURL}"
+
+    # Initialize the OpenAPI specification dictionary with basic information and server URL.
     openapi_dict = {
         "openapi": "3.0.0",
         "info": {
-            "title": "",
+            "title": f"Burp2API - {api_name}",
             "version": "1.0.0",
-            "description":"This API has been built with [Burp2API](https://swagger.io)."
+            "description": "This API has been built with [Burp2API](https://github.com/MrTurvey/Burp2API). "
+                           "This is NOT a replacement for proper documentation that should stem from the official developers."
         },
-        "servers":{},
-        #"tags": [{"name":"APIs", "description": "Go nuts"}],
+        "servers": [{"url": base_url}],
         "paths": {}
     }
-    
-    baseURL = None
-    APIname = None
 
-    for item in treeRoot:
-
+    # Iterate over each XML "item" to populate the "paths" in the OpenAPI spec.
+    for item in items:
+        # Extract relevant details from each "item".
         url, uPath = item.findtext("url"), item.findtext("path")
-        method = item.findtext("method")
+        method = item.findtext("method").lower()
         status = item.findtext("status") or "200"  # Default to 200 if status is not specified
         HTTPparams = item.findtext("param")
 
-        if baseURL is None:
-            splitURL = url.split('/')[2]
-            APIname = splitURL.split(".")[0]
-            baseURL = "https://" + splitURL
-            openapi_dict["servers"] = [{"url": baseURL}] 
-
-       # Set the API name
-        openapi_dict["info"]["title"] = "Burp2API - " + APIname
-
-        # Set up the path item
+        # Prepare the path and method in the OpenAPI dictionary, initializing if not existent.
         path_item = openapi_dict["paths"].setdefault(uPath, {})
-        
-        path_item[method.lower()] = {
-            "responses": {
-                status: {"description": f"Response status {status}"}
-            }#,
-            #"tags": [ 
-            #    "APIs"
-           # ]
-        }
+        method_item = path_item.setdefault(method, {"responses": {status: {"description": f"Response status {status}"}}})
+
         # Check if there are HTTP parameters
         if HTTPparams:
-            # Split and deduplicate the parameters
-            splitParams = list(set([param.split('=')[0] for param in HTTPparams.split('&')]))
+            parameters, requestBody = [], {"content": {}}
+            for param in set(HTTPparams.split('&')):
+                param_name = param.split('=')[0]
+                # If the parameter is a JSON object, process it.
+                if is_json_param(param_name):
+                    properties_dict = {key: {"type": "string"} for key in json.loads(param_name).keys()}
+                    requestBody["content"]["application/json"] = {
+                        "schema": {"type": "object", "properties": properties_dict}
+                    }
+                else:
+                    # Otherwise, treat it as a query parameter.
+                    parameters.append({
+                        "name": param_name,
+                        "in": "query",
+                        "required": False,
+                        "schema": {"type": "string"}
+                    })
 
-            # Determine the location of the parameters based on the HTTP method
-            param_location = "query" if method == "GET" else "query"  # Adjust 'body' as needed
+            # If there's a requestBody defined, add it to the method item.
+            if requestBody["content"]:
+                method_item["requestBody"] = requestBody
+            # If there are query parameters, add them to the method item
+            if parameters:
+                method_item["parameters"] = parameters
 
-            # Construct the parameters list
-            parameters = [{"name": param, "in": param_location, "required": False, "schema": {"type": "string"}} for param in splitParams]
-
-            # Add the parameters to the path item
-            path_item[method.lower()]["parameters"] = parameters
-
-            # Add responses to the path item
-            path_item[method.lower()]["responses"] = {status: {"description": f"Response status {status}"}}
+    # Return the constructed OpenAPI specification dictionary.
     return openapi_dict
 
 def write_to_file(data, filename):

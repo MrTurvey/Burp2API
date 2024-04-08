@@ -42,5 +42,3 @@ https://editor.swagger.io
 ## Limitations 
 
 The tool is fresh, there are probably a lot of things that need fixing.
-
-The only limitation I am aware of right now, is that it will only parse REST APIs.
