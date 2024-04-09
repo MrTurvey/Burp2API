@@ -7,7 +7,7 @@ import os
 import json
 
 # set output directory
-directory = "output"
+outputDirectory = "output"
 
 def process_tree(tree):
     # Extract root from XML, define the HTTP method order and use a set to track unique URL, method and paths.
@@ -156,27 +156,27 @@ def write_to_file(data, filename):
 
 if __name__ == "__main__":
     if len(sys.argv) != 2:
-        print("Usage: python process_xml.py <input_xml_file>")
+        print("Usage: python burp2api.py <input_xml_file>")
         sys.exit(1)
 
-    #take XML input, parse it to element tree, get root element <items>, process it
+    # take XML input, parse it to element tree, get root element <items>, process it
     input_xml_file = sys.argv[1]
     tree = ET.parse(input_xml_file)
     treeProcessed = process_tree(tree)
     
-    #creat output directory if it doesn't exist
-    if not os.path.exists(directory):
+    # create output directory if it doesn't exist
+    if not os.path.exists(outputDirectory):
         # Create the directory
-        os.makedirs(directory)
+        os.makedirs(outputDirectory)
 
-    #Get filename for outputting
-    full_path = r"C:\Users\Turv\Desktop\Burp2API\testfiles\testxml"
-    file_name = os.path.basename(full_path)
-
-    #output to OpenAPI
+    # Extract just the XML file name
+    file_name = os.path.basename(sys.argv[1])
+    
+    # output to OpenAPI JSON
     openapi_json = json.dumps(convert_to_openapi(treeProcessed), indent=2)
-    write_to_file(openapi_json, "output/" + file_name + ".json")
+    write_to_file(openapi_json, outputDirectory + "/" + file_name + ".json")
 
-    #output modifed XML
-    tree.write(f"output\{file_name}_modified")
+    # output modifed XML
+    tree.write(os.path.join(outputDirectory, f"{file_name}_modified"))
+
     print(f"Modified XML saved to {file_name}_modified.xml")
