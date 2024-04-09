@@ -9,6 +9,15 @@ There are currently two purposes for the creation of this tool:
 
 This project is maintained by [TurvSec](https://twitter.com/TurvSec)
 
+## Output Examples 
+Here's what your JSON will look like in Swagger:
+
+![Alt text](/examples/ss1.png "Swagger Output")
+
+Here's what your JSON will look like in Postman:
+
+![Alt text](/examples/ss2.png "Postman Output")
+
 ## Installation
 Simply git clone and you're away:
 ```
