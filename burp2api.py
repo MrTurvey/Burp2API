@@ -70,8 +70,8 @@ def process_tree(tree):
 # For checking if the input is a valid JSON string
 def is_json_param(param):
     try:
-        json.loads(param)  # Try to parse the parameter as JSON
-        return True
+        res = json.loads(param)  # Try to parse the parameter as JSON
+        return isinstance(res, dict)
     except ValueError:
         return False
 
