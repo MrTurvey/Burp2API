@@ -1,4 +1,8 @@
 # Burp2API - Turn Burp Suite Projects Into JSON
+## Use Burp2API via Vulnsy (No data is sent to server)
+
+https://www.vulnsy.com/free-tools/burp-to-openapi
+
 ## What is this project? 
 
 Burp2API converts your Burp Suite project into a JSON for usage with POSTMAN or SWAGGER editor.
